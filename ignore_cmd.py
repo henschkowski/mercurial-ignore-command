@@ -62,8 +62,9 @@ def is_already_ignored(file_rel, ignore_filename):
 
 def ignore(ui, repo, *user_files, **opts):
     # The doc string below will show up in hg help.
-    """Add files to ignore list in the .hgignore file."""
+    """Add names to ignore list in the .hgignore file."""
 
+    use_glob = opts.get('globs')
     # Use HG API call to get all files in state "unknown". Those are relative to the repo root
     unknown_files = repo.status(unknown=True)[4]
     # Bring user-given file names into the "relative-to-HG-root" format
@@ -79,36 +80,43 @@ def ignore(ui, repo, *user_files, **opts):
 
     # Check if the files given on the command line are really unknown to HG
     already_ignored = set()
-    for f in files:
-        if os.path.isdir(f):
-            # Directories are not tracked, but we want to add them to .hgignore, anyway. 
-            continue
-        if f not in unknown_files:
+    if use_glob:
+        for f in files:
             if is_already_ignored(f, ignore_filename):
-                ui.write("File %s is already ignored.\n" % (f,))
+                ui.write("Pattern %s is already active.\n" % (f,))
                 already_ignored.add(f)
-            else:
-                raise util.Abort("File %s is not in state UNKNOWN." % (f,))
+    else:
+        for f in files:
+            if os.path.isdir(f):
+                # Directories are not tracked, but we want to add them to .hgignore, anyway. 
+                continue
+            if f not in unknown_files:
+                if is_already_ignored(f, ignore_filename):
+                    ui.write("File %s is already ignored.\n" % (f,))
+                    already_ignored.add(f)
+                else:
+                    raise util.Abort("File %s is not in state UNKNOWN." % (f,))
 
     # Prepare list of files to be ignored in .hgignore line-by-line syntax
     ignores = ""
     for f in (set(files) - already_ignored):
         ignores += f
         ignores += '\n'
-    ui.write("Ignored:\n%s" % (ignores,))
+    if len(ignores):
+        ui.write("Ignored:\n%s" % (ignores,))
 
     # Search for the glob section in .hgignore; when found, insert filenames after
-    found_glob = False
+    found_glob_section = False
     for line in fileinput.input(ignore_filename, inplace=True, mode="rU"):
         if re.match("^syntax:.*glob", line):
             sys.stdout.write(line)
             sys.stdout.write(ignores)
-            found_glob = True
+            found_glob_section = True
         else:
             sys.stdout.write(line)
 
     # No "syntax: glob" section in .hgignore file found -> create one
-    if not found_glob:
+    if not found_glob_section:
         with open(ignore_filename, "a") as ignore_file:
             ignore_file.write("syntax: glob\n")
             ignore_file.write(ignores)
@@ -119,7 +127,8 @@ cmdtable = {
     # cmd name        function call
     'ignore': (ignore,
                # See mercurial/fancyopts.py for all of the command flag options.
-               [], "hg ignore <files...>"
+               [('g', 'glob', None, 'arguments are specified as globs, not file/dir names')],
+               "hg ignore [-g|--glob] <names...>"
                )
 }
 
